@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "language": "python",
+  "project_shape": "backend",
+  "source_extensions": [
+    ".py"
+  ],
+  "build_command": "python3 -m compileall -q src tools",
+  "testing": "deferred",
+  "workflow_checks": [
+    {
+      "workflow_id": "register-video-clip",
+      "command": "PYTHONPATH=src:. python3 tools/check_clip_intake.py"
+    },
+    {
+      "workflow_id": "index-shot-boundaries",
+      "command": "PYTHONPATH=src:. python3 tools/check_shot_index.py"
+    },
+    {
+      "workflow_id": "create-contact-sheet",
+      "command": "PYTHONPATH=src:. python3 tools/check_contact_sheet.py"
+    }
+  ]
+}

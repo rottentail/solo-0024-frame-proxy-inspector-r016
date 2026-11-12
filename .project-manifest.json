@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "name": "Frame Proxy Inspector",
+  "project_shape": "backend",
+  "language": "python",
+  "modules": [
+    {
+      "id": "http",
+      "path": "src/frame_proxy/http",
+      "responsibility": "bounded HTTP parsing, routing, and stable error responses"
+    },
+    {
+      "id": "domain",
+      "path": "src/frame_proxy/domain",
+      "responsibility": "media records, limits, errors, and state transitions"
+    },
+    {
+      "id": "media",
+      "path": "src/frame_proxy/media",
+      "responsibility": "AVI parsing, frame decoding, frame fingerprints, cut detection, and PPM composition"
+    },
+    {
+      "id": "service",
+      "path": "src/frame_proxy/service",
+      "responsibility": "workflow orchestration, job publication, and failure propagation"
+    },
+    {
+      "id": "storage",
+      "path": "src/frame_proxy/storage",
+      "responsibility": "namespaced records, exclusive creation, locking, and atomic publication"
+    }
+  ],
+  "complexity": {
+    "mechanisms": [
+      "state_transition",
+      "error_propagation",
+      "resource_lifecycle",
+      "concurrency",
+      "validation_boundary",
+      "atomic_commit",
+      "deterministic_transform"
+    ]
+  },
+  "workflows": [
+    {
+      "id": "register-video-clip",
+      "name": "Register video clip",
+      "entry": "PUT /v1/clips/{clip_id}",
+      "steps": [
+        "read and bound the uploaded AVI payload",
+        "parse RIFF geometry and frame offsets",
+        "atomically commit clip bytes and metadata"
+      ],
+      "success": "returns a registered clip whose digest and geometry describe the stored bytes",
+      "failure": "returns a stable validation or conflict error without a visible partial clip",
+      "verification": "the clip intake smoke path uploads generated AVI footage, reads the record, and rejects a truncated payload",
+      "module_ids": [
+        "http",
+        "domain",
+        "media",
+        "service",
+        "storage"
+      ]
+    },
+    {
+      "id": "index-shot-boundaries",
+      "name": "Index shot boundaries",
+      "entry": "POST /v1/clips/{clip_id}/inspections",
+      "steps": [
+        "create and transition an inspection job",
+        "decode sampled frames and compute fingerprints",
+        "persist contiguous scenes and representative frames"
+      ],
+      "success": "returns an indexed inspection with complete ordered scene ranges",
+      "failure": "returns a failed inspection with no partial successful scene index",
+      "verification": "the scene indexing smoke path detects all generated scene changes and verifies the terminal job state",
+      "module_ids": [
+        "http",
+        "domain",
+        "media",
+        "service",
+        "storage"
+      ]
+    },
+    {
+      "id": "create-contact-sheet",
+      "name": "Create contact sheet",
+      "entry": "POST /v1/inspections/{inspection_id}/contact-sheets",
+      "steps": [
+        "validate a bounded grid request",
+        "decode representative frames and compose fixed-size tiles",
+        "commit the PPM payload and matching tile map"
+      ],
+      "success": "returns a ready contact sheet whose digest and dimensions match the artifact",
+      "failure": "rejects an oversized grid without exposing a visible partial artifact",
+      "verification": "the contact sheet smoke path fetches the PPM artifact and confirms the committed layout and representative scenes",
+      "module_ids": [
+        "http",
+        "domain",
+        "media",
+        "service",
+        "storage"
+      ]
+    }
+  ]
+}

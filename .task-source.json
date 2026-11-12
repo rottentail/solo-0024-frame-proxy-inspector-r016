@@ -1,0 +1,253 @@
+{
+  "task_source_schema_version": 1,
+  "cc_feedback_profile": "cc-feedback-2611",
+  "project_domain": "游戏、图形与多媒体",
+  "project_subdirection": "音视频处理",
+  "supported_task_types": [
+    "功能开发",
+    "Bugfix",
+    "代码重构",
+    "功能优化",
+    "质量保障",
+    "问题排查与诊断"
+  ],
+  "name": "Frame Proxy Inspector",
+  "project_shape": "backend",
+  "modules": [
+    {
+      "id": "http",
+      "path": "src/frame_proxy/http",
+      "responsibility": "bounded transport parsing and stable status mapping"
+    },
+    {
+      "id": "domain",
+      "path": "src/frame_proxy/domain",
+      "responsibility": "records, policy limits, and legal state transitions"
+    },
+    {
+      "id": "media",
+      "path": "src/frame_proxy/media",
+      "responsibility": "AVI frame access and deterministic visual derivatives"
+    },
+    {
+      "id": "service",
+      "path": "src/frame_proxy/service",
+      "responsibility": "workflow orchestration and commit or fail decisions"
+    },
+    {
+      "id": "storage",
+      "path": "src/frame_proxy/storage",
+      "responsibility": "namespaced persistence, locks, and atomic commits"
+    }
+  ],
+  "complexity": {
+    "mechanisms": [
+      "state_transition",
+      "error_propagation",
+      "resource_lifecycle",
+      "concurrency",
+      "atomic_commit"
+    ]
+  },
+  "entities": [
+    {
+      "id": "video_clip",
+      "label": "Video clip",
+      "relations": [
+        "shot_inspection.belongs_to.video_clip",
+        "video_clip.has_many.shot_inspection"
+      ],
+      "invariants": [
+        "Stored digest and frame geometry describe the immutable clip bytes",
+        "Declared frame count equals the number of parsed frame chunks",
+        "A rejected probe leaves no visible clip record"
+      ]
+    },
+    {
+      "id": "shot_inspection",
+      "label": "Shot inspection",
+      "relations": [
+        "shot_inspection.references.video_clip",
+        "contact_sheet.consumes.shot_inspection"
+      ],
+      "invariants": [
+        "Scenes are ordered, contiguous, and end at the clip frame count",
+        "The first scene starts at frame zero",
+        "Failed inspections do not expose successful scenes"
+      ]
+    },
+    {
+      "id": "contact_sheet",
+      "label": "Contact sheet",
+      "relations": [
+        "contact_sheet.consumes.shot_inspection"
+      ],
+      "invariants": [
+        "Tile map, dimensions, and artifact digest agree",
+        "Each source scene appears at most once",
+        "No visible artifact exists before a ready terminal state"
+      ]
+    }
+  ],
+  "state_machines": [
+    {
+      "subject": "video_clip",
+      "states": [
+        "probing",
+        "registered"
+      ],
+      "transitions": [
+        "probing->registered"
+      ],
+      "invariants": [
+        "Only registered clips can be inspected",
+        "Clip intake is immutable"
+      ]
+    },
+    {
+      "subject": "shot_inspection",
+      "states": [
+        "pending",
+        "scanning",
+        "indexed",
+        "failed"
+      ],
+      "transitions": [
+        "pending->scanning",
+        "scanning->indexed",
+        "pending->failed",
+        "scanning->failed"
+      ],
+      "invariants": [
+        "indexed and failed are terminal",
+        "only indexed inspections can produce contact sheets",
+        "failed records retain a stable code and message"
+      ]
+    },
+    {
+      "subject": "contact_sheet",
+      "states": [
+        "planned",
+        "compositing",
+        "ready",
+        "failed"
+      ],
+      "transitions": [
+        "planned->compositing",
+        "compositing->ready",
+        "planned->failed",
+        "compositing->failed"
+      ],
+      "invariants": [
+        "ready and failed are terminal",
+        "only ready records resolve an artifact",
+        "failed composition removes temporary output"
+      ]
+    }
+  ],
+  "capability_families": [
+    {
+      "family": "RIFF/AVI container probing",
+      "occupied_by": [
+        "avi_header_parser",
+        "frame_offset_index"
+      ],
+      "available": false
+    },
+    {
+      "family": "Frame fingerprinting",
+      "occupied_by": [
+        "luma_histogram",
+        "mean_color_distance"
+      ],
+      "available": false
+    },
+    {
+      "family": "Shot boundary detection",
+      "occupied_by": [
+        "threshold_cut_detector",
+        "minimum_scene_guard"
+      ],
+      "available": false
+    },
+    {
+      "family": "Contact sheet composition",
+      "occupied_by": [
+        "nearest_neighbor_tiles",
+        "bounded_grid_layout"
+      ],
+      "available": false
+    },
+    {
+      "family": "Durable job lifecycle",
+      "occupied_by": [
+        "exclusive_creation",
+        "state_transition_records",
+        "temporary_file_cleanup"
+      ],
+      "available": false
+    },
+    {
+      "family": "Additional container adapters",
+      "occupied_by": [],
+      "available": true
+    },
+    {
+      "family": "Audio stream inspection",
+      "occupied_by": [],
+      "available": true
+    },
+    {
+      "family": "Tile annotation and safe-area overlays",
+      "occupied_by": [],
+      "available": true
+    }
+  ],
+  "extension_seams": [
+    {
+      "id": "container-adapter",
+      "anchor": "src/frame_proxy/media/avi.py probe_avi and iter_frames",
+      "entry": "PUT /v1/clips/{clip_id}",
+      "distinct_outcome": "A second container adapter can normalize frame access while preserving clip records and inspection contracts.",
+      "mechanism": "validation_boundary"
+    },
+    {
+      "id": "cut-detector-policy",
+      "anchor": "src/frame_proxy/media/detector.py detect_cuts",
+      "entry": "POST /v1/clips/{clip_id}/inspections",
+      "distinct_outcome": "Adaptive thresholding can change scene boundaries without changing state or persistence behavior.",
+      "mechanism": "deterministic_transform"
+    },
+    {
+      "id": "sheet-layout",
+      "anchor": "src/frame_proxy/media/contact.py compose_grid",
+      "entry": "POST /v1/inspections/{inspection_id}/contact-sheets",
+      "distinct_outcome": "Labels and safe-area overlays can be added to cells with a matching tile-map record.",
+      "mechanism": "schema_extension"
+    },
+    {
+      "id": "repository-boundary",
+      "anchor": "src/frame_proxy/storage/repository.py FileRepository",
+      "entry": "all three workflow services",
+      "distinct_outcome": "A transactional repository can replace local files without changing HTTP or media contracts.",
+      "mechanism": "storage_boundary"
+    }
+  ],
+  "tension_points": [
+    {
+      "workflow_id": "register-video-clip",
+      "description": "Accepting a seemingly readable partial AVI versus proving complete frame and index coverage before publication",
+      "observable_failure": "A truncated payload becomes visible as a clip, or registered geometry disagrees with the stored bytes."
+    },
+    {
+      "workflow_id": "index-shot-boundaries",
+      "description": "Splitting on small visual jumps versus preserving a useful minimum scene length and contiguous frame coverage",
+      "observable_failure": "A boundary creates a zero-length scene, overlaps a neighbor, or leaves the final scene short of the clip end."
+    },
+    {
+      "workflow_id": "create-contact-sheet",
+      "description": "Honoring the requested large grid versus enforcing a bounded working set and committing an artifact that exactly matches its tile map",
+      "observable_failure": "An oversized request silently downscales, or a failed composition leaves a fetchable partial PPM."
+    }
+  ]
+}
