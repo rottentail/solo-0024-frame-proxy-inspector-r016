@@ -17,7 +17,7 @@ from frame_proxy.domain.policies import (
     validate_identifier,
 )
 from frame_proxy.domain.transitions import transition_inspection
-from frame_proxy.media.avi import probe_avi
+from frame_proxy.media.avi import AviDescriptor, probe_avi
 from frame_proxy.media.detector import analyze_frames
 from frame_proxy.media.fingerprint import FrameFingerprint, fingerprint_frame
 from frame_proxy.media.frames import decode_frame_at
@@ -25,23 +25,28 @@ from frame_proxy.storage.repository import FileRepository
 
 
 class _FingerprintMemo:
+    """Bounded cross-request cache of frame fingerprints.
+
+    A fingerprint is a pure function of one frame's pixels, so entries are
+    keyed by the verified digest of the clip media they were derived from
+    plus the frame index. Clips that merely share frame geometry or
+    container layout never share entries, and cached values are immutable,
+    so one task can never observe or alter another clip's scene facts.
+    """
+
     def __init__(self, max_entries: int = 4096) -> None:
         self._max_entries = max_entries
-        self._entries: OrderedDict[tuple[int, ...], FrameFingerprint] = OrderedDict()
+        self._entries: OrderedDict[tuple[str, int], FrameFingerprint] = OrderedDict()
         self._guard = Lock()
 
     def obtain(
-        self, media: bytes, descriptor: object, frame_index: int
+        self,
+        media_key: str,
+        media: bytes,
+        descriptor: AviDescriptor,
+        frame_index: int,
     ) -> FrameFingerprint:
-        key = (
-            descriptor.width,
-            descriptor.height,
-            descriptor.frame_count,
-            descriptor.frame_payload_size,
-            descriptor.row_stride,
-            int(descriptor.top_down),
-            descriptor.frame_offsets[frame_index],
-        )
+        key = (media_key, frame_index)
         with self._guard:
             cached = self._entries.pop(key, None)
             if cached is not None:
@@ -90,7 +95,8 @@ class InspectionService:
         self._repository.update_inspection(record)
         try:
             media = self._repository.get_clip_media(clip.clip_id)
-            if hashlib.sha256(media).hexdigest() != clip.digest:
+            media_digest = hashlib.sha256(media).hexdigest()
+            if media_digest != clip.digest:
                 raise MediaValidationError(
                     "stored clip digest does not match its record",
                     code=ErrorCode.FRAME_DECODE,
@@ -100,7 +106,7 @@ class InspectionService:
                 range(0, descriptor.frame_count, request.sample_stride)
             )
             fingerprints = tuple(
-                _FINGERPRINT_MEMO.obtain(media, descriptor, frame_index)
+                _FINGERPRINT_MEMO.obtain(media_digest, media, descriptor, frame_index)
                 for frame_index in sampled_frames
             )
             result = analyze_frames(

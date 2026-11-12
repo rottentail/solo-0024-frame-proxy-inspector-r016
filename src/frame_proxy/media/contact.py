@@ -3,40 +3,12 @@ from __future__ import annotations
 import hashlib
 import math
 from dataclasses import dataclass
-from threading import Lock
 
 from frame_proxy.domain.errors import ErrorCode, ValidationError
 from frame_proxy.domain.models import SceneRecord
 from frame_proxy.domain.policies import ContactSheetRequest
 from frame_proxy.media.frames import Frame
 from frame_proxy.media.ppm import encode_ppm
-
-
-class _CanvasWorkspace:
-    def __init__(self, max_bytes: int = 24 * 1024 * 1024) -> None:
-        self._max_bytes = max_bytes
-        self._pixels = bytearray()
-        self._guard = Lock()
-
-    def prepare(
-        self, width: int, height: int, background: tuple[int, int, int]
-    ) -> bytearray | memoryview:
-        required = width * height * 3
-        if required > self._max_bytes:
-            return bytearray(background) * (width * height)
-        with self._guard:
-            if len(self._pixels) < required:
-                self._pixels = bytearray(required)
-            output = memoryview(self._pixels)[:required]
-            row = bytes(background) * width
-            stride = width * 3
-            for y in range(height):
-                start = y * stride
-                output[start:start + stride] = row
-            return output
-
-
-_CANVAS_WORKSPACE = _CanvasWorkspace()
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,9 +135,10 @@ def compose_grid(
 ) -> GridResult:
     if len(scenes) > plan.columns * plan.rows:
         raise ValueError("scene count exceeds grid capacity")
-    pixels = _CANVAS_WORKSPACE.prepare(
-        plan.image_width, plan.image_height, background_rgb
-    )
+    # The canvas is private to this composition: concurrent contact sheet
+    # jobs never share pixel buffers. plan_grid has already bounded this
+    # allocation with the configured pixel budget.
+    pixels = bytearray(background_rgb) * (plan.image_width * plan.image_height)
     tile_map: list[dict[str, int]] = []
 
     for tile_index, scene in enumerate(scenes):

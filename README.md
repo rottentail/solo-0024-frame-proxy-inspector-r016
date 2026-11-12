@@ -138,6 +138,7 @@ Run one workflow check at a time:
 PYTHONPATH=src:. python3 tools/check_clip_intake.py
 PYTHONPATH=src:. python3 tools/check_shot_index.py
 PYTHONPATH=src:. python3 tools/check_contact_sheet.py
+PYTHONPATH=src:. python3 tools/check_media_isolation.py
 ```
 
 Each check starts a real loopback HTTP server, generates media through the
